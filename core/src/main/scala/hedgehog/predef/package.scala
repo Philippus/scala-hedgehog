@@ -43,4 +43,10 @@ package object predef {
         F.ap(sequence(t))(F.ap(h)(F.point((h2 : A) => (t2 : List[A]) => h2 :: t2)))
     }
   }
+
+  def traverse[M[_], A, B](fa: List[A])(f: A => M[B])(implicit F: Applicative[M]): M[List[B]] =
+    sequence(fa.map(f))
+
+  def traverse_[M[_], A](fa: List[A])(f: A => M[Unit])(implicit F: Applicative[M]): M[Unit] =
+    F.map(traverse(fa)(f))(_ => ())
 }

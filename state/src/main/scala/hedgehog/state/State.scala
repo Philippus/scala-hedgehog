@@ -60,6 +60,8 @@ case class EnvironmentTypeError(a: Any, b: Any) extends EnvironmentError
 
 /**********************************************************************/
 // Callback
+// NOTE: This is different from the Haskell version that makes this a GADT
+// which I think just makes you jump through more hoops
 
 case class Require[Input[_[_]], Output, State[_[_]]](
     run: (State[Symbolic], Input[Symbolic]) => Boolean
@@ -76,7 +78,12 @@ case class Ensure[Input[_[_]], Output, State[_[_]]](
 
 /**********************************************************************/
 
-/** The specification for the expected behaviour of an `Action`. */
+/**
+ * The specification for the expected behaviour of an `Action`.
+ *
+ * NOTE: We unfortunately expose the input/output types at the trait level (unlike the Haskell versions existentials).
+ * It's almost certainly possible to use type members, but I couldn't get the path-dependent types to place nice.
+ */
 trait Command[N[_], M[_], State[_[_]], Input[_[_]], Output] {
 
   def gen(s: State[Symbolic]): Option[N[Input[Symbolic]]]
@@ -92,15 +99,19 @@ trait Command[N[_], M[_], State[_[_]], Input[_[_]], Output] {
   def genOK(state: State[Symbolic]): Boolean =
     gen(state).isDefined
 
+  // Helper functions
+
   def require(s: State[Symbolic], i: Input[Symbolic]): Boolean =
     requires.forall(_.run(s, i))
 
+  def update[V[_]](s0: State[V], i: Input[V], o: Var[Output, V]): State[V] =
+    updates.foldLeft(s0)((s, u) => u.run(s, i, o))
+
+  def ensure(s0: State[Concrete], s: State[Concrete], i: Input[Concrete], o: Output): Property[Unit] =
+    traverse_(ensures)(_.run(s0, s, i, o))
 }
 
 trait Action[M[_], State[_[_]], Input[_[_]], Output] {
-
-//  type Input[_[_]]
-//  type Output
 
   def input: Input[Symbolic]
 
@@ -110,9 +121,9 @@ trait Action[M[_], State[_[_]], Input[_[_]], Output] {
 
   def require(state: State[Symbolic], input: Input[Symbolic]): Boolean
 
-//  def update[V[_]](state: State[V], input: Input[V], v: Var[Output, V]): State[V]
+  def update[V[_]](state: State[V], input: Input[V], v: Var[Output, V]): State[V]
 
-//  def ensure(state: State[Concrete], state2: State[Concrete], input: Input[Concrete], output: Output): Property[Unit]
+  def ensure(state: State[Concrete], state2: State[Concrete], input: Input[Concrete], output: Output): Property[Unit]
 }
 
 case class Context[State[_[_]]](state: State[Symbolic], vars: Map[Name, ClassTag[_]])
@@ -152,16 +163,20 @@ object Action {
           GenT.GenApplicative.point(None)
         } else {
           val (context2, outputt) = Context.newVar[State, Output](context)
-          val context3 = context2.copy(state =
-            cmd.updates.foldLeft(context.state)((s, u) => u.run(s, inputt, Var(outputt)))
-          )
+          val context3 = context2.copy(state = cmd.update(context.state, inputt, Var(outputt)))
           GenT.GenApplicative.point(Some((context3, new Action[M, State, Input, Output] {
-            override def input: Input[Symbolic] = inputt
-            override def output: Symbolic[Output] = outputt
-            override def execute(input: Input[Concrete]): M[Output] = cmd.execute(input)
-            override def require(state: State[Symbolic], input: Input[Symbolic]): Boolean = cmd.require(state, input)
-    //                override def update[V[_]](state: State[V], input: cmd.Input[V], v: Var[this.type, V]): State[V] = ???
-    //                override def ensure(state: State[Concrete], state2: State[Concrete], input: cmd.Input[Concrete], output: this.type): Property[Unit] = ???
+            override def input: Input[Symbolic] =
+              inputt
+            override def output: Symbolic[Output] =
+              outputt
+            override def execute(input: Input[Concrete]): M[Output] =
+              cmd.execute(input)
+            override def require(state: State[Symbolic], input: Input[Symbolic]): Boolean =
+              cmd.require(state, input)
+            override def update[V[_]](state: State[V], input: Input[V], v: Var[Output, V]): State[V] =
+              cmd.update(state, input, v)
+            override def ensure(state: State[Concrete], state2: State[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
+              cmd.ensure(state, state2, input, output)
           })))
 
         }
