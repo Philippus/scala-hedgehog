@@ -67,10 +67,20 @@ sealed trait Callback[Input[_[_]], Output, State[_[_]]] {
     this match {
       case Require(f) =>
         f(s, i)
-      case Update(_) =>
+      case _: Update[Input, Output, State] =>
         true
       case Ensure(_) =>
         true
+    }
+
+  def update1[V[_]](s: State[V], i: Input[V], o: Var[Output, V]): State[V] =
+    this match {
+      case Require(_) =>
+        s
+      case u: Update[Input, Output, State] =>
+        u.run(s, i, o)
+      case Ensure(_) =>
+        s
     }
 }
 
@@ -78,9 +88,9 @@ case class Require[Input[_[_]], Output, State[_[_]]](
     run: (State[Symbolic], Input[Symbolic]) => Boolean
   ) extends Callback[Input, Output, State] {
 }
-case class Update[V[_], Input[_[_]], Output, State[_[_]]](
-    run: (State[V], Input[V], Var[Output, V]) => State[V]
-  ) extends Callback[Input, Output, State]
+class Update[Input[_[_]], Output, State[_[_]]] extends Callback[Input, Output, State] {
+  def run[V[_]](s: State[V], i: Input[V], v: Var[Output, V]): State[V]
+}
 case class Ensure[Input[_[_]], Output, State[_[_]]](
     run: (State[Concrete], State[Concrete], Input[Concrete], Output) => Property[Unit]
   ) extends Callback[Input, Output, State]
@@ -102,13 +112,8 @@ trait Command[N[_], M[_], State[_[_]], Input[_[_]], Output] {
   def genOK(state: State[Symbolic]): Boolean =
     gen(state).isDefined
 
-  def genRequire(s: State[Symbolic])(implicit F: Functor[N]): Boolean =
-    gen(s) match {
-      case None =>
-        Left(())
-      case Some(in) =>
-        Right(F.map(in)(i => callbacks.forall(_.require1(s, i))))
-    }
+  def require(s: State[Symbolic], i: Input[Symbolic]): Boolean =
+    callbacks.forall(_.require1(s, i))
 
 }
 
@@ -144,6 +149,15 @@ object Context {
     }
     (c.copy(vars = Symbolic.insert[A](c.vars, v)), v)
   }
+
+
+  def update[Input[_[_]], Output, State[_[_]], V[_]](
+      callbacks: List[Callback[Input, Output, State]]
+    , s0: State[V]
+    , i: Input[V]
+    , o: Var[Output, V]
+    ): State[V] =
+      ???
 }
 
 object Action {
@@ -151,30 +165,35 @@ object Action {
   def action[N[_], M[_], State[_[_]], Input[_[_]], Output](
       commands: List[Command[N, M, State, Input, Output]]
     , context: Context[State]
-    )(implicit F: Monad[N], T: ClassTag[Output]): GenT[N, (Context[State], Action[M, State, Input, Output])] =
+    )(implicit F: Monad[N], T: ClassTag[Output]
+    ): GenT[N, (Context[State], Action[M, State, Input, Output])] =
 
-    genT.fromSome(genT.elementUnsafe(commands.filter(_.genOK(context.state))).flatMap(cmd =>
-      cmd.genRequire(context.state) match {
-        case Left(_) =>
+    genT.fromSome(for {
+      cmd <- genT.elementUnsafe(commands.filter(_.genOK(context.state)))
+      inputt <- cmd.gen(context.state) match {
+        case None =>
           sys.error("Command.gen: internal error, tried to use generator with invalid state.")
-        case Right(nb) =>
-          genT.lift(nb).flatMap(b =>
-            if (!b) {
-              GenT.GenApplicative.point(None)
-            } else {
-              val (context2, outputt) = Context.newVar[State, Output](context)
-//               Context.update(cmd.callbacks, cmd, input, Var(output))
-              GenT.GenApplicative.point(Some((context, new Action[M, State, Input, Output] {
-                override def input = ???
-                override def output = outputt
-                override def execute(input: Input[Concrete]) = cmd.execute(input)
-                override def require(state: State[Symbolic], input: Input[Symbolic]): Boolean = ???
-//                override def update[V[_]](state: State[V], input: cmd.Input[V], v: Var[this.type, V]): State[V] = ???
-//                override def ensure(state: State[Concrete], state2: State[Concrete], input: cmd.Input[Concrete], output: this.type): Property[Unit] = ???
-              })))
-
-            }
-          )
+        case Some(nb) =>
+          genT.lift(nb)
       }
-    ))
+      x <-
+        if (!cmd.require(context.state, inputt)) {
+          GenT.GenApplicative.point(None)
+        } else {
+          val (context2, outputt) = Context.newVar[State, Output](context)
+          val context3 = context2.copy(state =
+            Context.update[Input, Output, State, Symbolic](cmd.callbacks, context.state, inputt, Var(outputt))
+          )
+          GenT.GenApplicative.point(Some((context3, new Action[M, State, Input, Output] {
+            override def input: Input[Symbolic] = inputt
+            override def output: Symbolic[Output] = outputt
+            override def execute(input: Input[Concrete]): M[Output] = cmd.execute(input)
+            override def require(state: State[Symbolic], input: Input[Symbolic]): Boolean = cmd.require(state, input)
+    //                override def update[V[_]](state: State[V], input: cmd.Input[V], v: Var[this.type, V]): State[V] = ???
+    //                override def ensure(state: State[Concrete], state2: State[Concrete], input: cmd.Input[Concrete], output: this.type): Property[Unit] = ???
+          })))
+
+        }
+
+      } yield x)
 }
