@@ -61,43 +61,19 @@ case class EnvironmentTypeError(a: Any, b: Any) extends EnvironmentError
 /**********************************************************************/
 // Callback
 
-sealed trait Callback[Input[_[_]], Output, State[_[_]]] {
-
-  def require1(s: State[Symbolic], i: Input[Symbolic]): Boolean =
-    this match {
-      case Require(f) =>
-        f(s, i)
-      case _: Update[Input, Output, State] =>
-        true
-      case Ensure(_) =>
-        true
-    }
-
-  def update1[V[_]](s: State[V], i: Input[V], o: Var[Output, V]): State[V] =
-    this match {
-      case Require(_) =>
-        s
-      case u: Update[Input, Output, State] =>
-        u.run(s, i, o)
-      case Ensure(_) =>
-        s
-    }
-}
-
 case class Require[Input[_[_]], Output, State[_[_]]](
     run: (State[Symbolic], Input[Symbolic]) => Boolean
-  ) extends Callback[Input, Output, State] {
-}
-class Update[Input[_[_]], Output, State[_[_]]] extends Callback[Input, Output, State] {
+  )
+
+trait Update[Input[_[_]], Output, State[_[_]]] {
+
   def run[V[_]](s: State[V], i: Input[V], v: Var[Output, V]): State[V]
 }
+
 case class Ensure[Input[_[_]], Output, State[_[_]]](
     run: (State[Concrete], State[Concrete], Input[Concrete], Output) => Property[Unit]
-  ) extends Callback[Input, Output, State]
+  )
 
-object Callback {
-
-}
 /**********************************************************************/
 
 /** The specification for the expected behaviour of an `Action`. */
@@ -107,13 +83,17 @@ trait Command[N[_], M[_], State[_[_]], Input[_[_]], Output] {
 
   def execute(s: Input[Concrete]): M[Output]
 
-  def callbacks: List[Callback[Input, Output, State]]
+  def requires: List[Require[Input, Output, State]]
+
+  def updates: List[Update[Input, Output, State]]
+
+  def ensures: List[Ensure[Input, Output, State]]
 
   def genOK(state: State[Symbolic]): Boolean =
     gen(state).isDefined
 
   def require(s: State[Symbolic], i: Input[Symbolic]): Boolean =
-    callbacks.forall(_.require1(s, i))
+    requires.forall(_.run(s, i))
 
 }
 
@@ -149,15 +129,6 @@ object Context {
     }
     (c.copy(vars = Symbolic.insert[A](c.vars, v)), v)
   }
-
-
-  def update[Input[_[_]], Output, State[_[_]], V[_]](
-      callbacks: List[Callback[Input, Output, State]]
-    , s0: State[V]
-    , i: Input[V]
-    , o: Var[Output, V]
-    ): State[V] =
-      ???
 }
 
 object Action {
@@ -182,7 +153,7 @@ object Action {
         } else {
           val (context2, outputt) = Context.newVar[State, Output](context)
           val context3 = context2.copy(state =
-            Context.update[Input, Output, State, Symbolic](cmd.callbacks, context.state, inputt, Var(outputt))
+            cmd.updates.foldLeft(context.state)((s, u) => u.run(s, inputt, Var(outputt)))
           )
           GenT.GenApplicative.point(Some((context3, new Action[M, State, Input, Output] {
             override def input: Input[Symbolic] = inputt
