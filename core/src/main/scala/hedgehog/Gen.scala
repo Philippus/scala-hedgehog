@@ -9,6 +9,18 @@ trait GenTOps[M[_]] {
   // Combinators
 
   /**
+   * Runs a `Option`` generator until it produces a `Some`.
+   *
+   * This is implemented using `filter` and has the same caveats.
+   */
+  def fromSome[A](gen: GenT[M, Option[A]])(implicit F: Monad[M]): GenT[M, A] =
+    gen.filter(_.isDefined)
+      .map(x => x.getOrElse(sys.error("fromSome: internal error, unexpected None")))
+
+  def lift[A](m: M[A])(implicit F: Functor[M]): GenT[M, A] =
+    GenT((_, s) => Tree.lift(F.map(m)(a => (s, Some(a)))))
+
+  /**
    * Construct a generator that depends on the size parameter.
    */
   def generate[A](f: (Size, Seed) => (Seed, A))(implicit F: Monad[M]): GenT[M, A] =
@@ -130,6 +142,22 @@ trait GenTOps[M[_]] {
    */
   def element[A](x: A, xs: List[A])(implicit F: Monad[M]): GenT[M, A] =
     integral[Int](Range.constant(0, xs.length)).map(i => (x :: xs)(i))
+
+  /**
+   * Randomly selects one of the elements in the list.
+   *
+   * This generator shrinks towards the first element in the list.
+   *
+   * WARNING: This may throw an exception if the list is empty,
+   * please use one of the other `element` variants if possible
+   */
+  def elementUnsafe[A](xs: List[A])(implicit F: Monad[M]): GenT[M, A] =
+    xs match {
+      case Nil =>
+        sys.error("element: used with empty list")
+      case h :: t =>
+        element(h, t)
+    }
 
   /**
    * Randomly selects one of the generators in the list.

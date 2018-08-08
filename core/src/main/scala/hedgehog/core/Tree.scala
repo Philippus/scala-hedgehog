@@ -79,5 +79,8 @@ object Tree extends TreeImplicits2 {
 
   def unfoldForest[M[_], A, B](f: B => A, g: B => List[B], x: B)(implicit F: Applicative[M]): List[Tree[M, A]] =
     g(x).map(y => unfoldTree(f, g, y)(F))
+
+  def lift[M[_], A](m: M[A])(implicit F: Functor[M]): Tree[M, A] =
+    Tree(F.map(m)(a => Node(a, Nil)))
 }
 

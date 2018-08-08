@@ -13,7 +13,7 @@ lazy val hedgehog = Project(
   )
   .settings(standardSettings)
   .settings(noPublish)
-  .aggregate(core, runner, sbtTest, test)
+  .aggregate(core, runner, sbtTest, state, test)
 
 lazy val standardSettings = Seq(
     Defaults.coreDefaultSettings
@@ -65,6 +65,16 @@ lazy val sbtTest = Project(
       "org.scala-sbt" % "test-interface" % "1.0"
     ))
   ).dependsOn(core, runner)
+
+lazy val state = Project(
+    id = "state"
+  , base = file("state")
+  // FIX Add to bintray once this actually works
+  ).settings(standardSettings ++ /* bintrarySettings ++ */ Seq(
+    name := "hedgehog-state"
+  ) ++ Seq(libraryDependencies ++= Seq(
+    ))
+  ).dependsOn(core)
 
 lazy val test = Project(
       id = "test"
