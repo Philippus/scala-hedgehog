@@ -14,7 +14,8 @@ trait GenTOps[M[_]] {
    * This is implemented using `filter` and has the same caveats.
    */
   def fromSome[A](gen: GenT[M, Option[A]])(implicit F: Monad[M]): GenT[M, A] =
-    gen.filter(_.isDefined)
+    gen
+      .filter(_.isDefined)
       .map(x => x.getOrElse(sys.error("fromSome: internal error, unexpected None")))
 
   def lift[A](m: M[A])(implicit F: Functor[M]): GenT[M, A] =

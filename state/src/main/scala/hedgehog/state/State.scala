@@ -160,11 +160,11 @@ object Action {
       }
       x <-
         if (!cmd.require(context.state, inputt)) {
-          GenT.GenApplicative.point(None)
+          genT.constant(None)
         } else {
           val (context2, outputt) = Context.newVar[State, Output](context)
           val context3 = context2.copy(state = cmd.update(context.state, inputt, Var(outputt)))
-          GenT.GenApplicative.point(Some((context3, new Action[M, State, Input, Output] {
+          genT.constant(Some((context3, new Action[M, State, Input, Output] {
             override def input: Input[Symbolic] =
               inputt
             override def output: Symbolic[Output] =
@@ -178,8 +178,23 @@ object Action {
             override def ensure(state: State[Concrete], state2: State[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
               cmd.ensure(state, state2, input, output)
           })))
-
         }
-
       } yield x)
+
+  def dropInvalid[State[_[_]], Input[_[_]], Output, M[_]](
+      actions: List[Action[M, State, Input, Output]]
+    , ctx: Context[State]
+    ): (Context[State], List[Action[M, State, Input, Output]]) =
+    ???
+
+  def genActions[N[_], M[_], State[_[_]], Input[_[_]], Output](
+      range: Range[Int]
+    , commands: List[Command[N, M, State, Input, Output]]
+    , ctx: Context[State]
+    )(implicit F: Monad[N], T: ClassTag[Output]
+    ): GenT[N, (Context[State], List[Action[M, State, Input, Output]])] =
+    // TODO We really need a StateT here, unfortunately all the GenT functions won't be compatible
+    action(commands, ctx).list(range).map(_.map(_._2)).flatMap(xs =>
+      genT.constant(dropInvalid(xs, ctx))
+    )
 }
