@@ -181,11 +181,6 @@ object Action {
         }
       } yield x)
 
-  def dropInvalid[State[_[_]], Input[_[_]], Output, M[_]](
-      actions: List[Action[M, State, Input, Output]]
-    , ctx: Context[State]
-    ): (Context[State], List[Action[M, State, Input, Output]]) =
-    ???
 
   def genActions[N[_], M[_], State[_[_]], Input[_[_]], Output](
       range: Range[Int]
@@ -197,4 +192,10 @@ object Action {
     action(commands, ctx).list(range).map(_.map(_._2)).flatMap(xs =>
       genT.constant(dropInvalid(xs, ctx))
     )
+
+  def dropInvalid[State[_[_]], Input[_[_]], Output, M[_]](
+      actions: List[Action[M, State, Input, Output]]
+    , ctx: Context[State]
+    ): (Context[State], List[Action[M, State, Input, Output]]) =
+    ???
 }
