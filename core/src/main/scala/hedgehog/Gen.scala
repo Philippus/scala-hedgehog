@@ -9,7 +9,7 @@ trait GenTOps[M[_]] {
   // Combinators
 
   /**
-   * Runs a `Option`` generator until it produces a `Some`.
+   * Runs a `Option` generator until it produces a `Some`.
    *
    * This is implemented using `filter` and has the same caveats.
    */

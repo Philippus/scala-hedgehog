@@ -13,6 +13,10 @@ package hedgehog
  */
 package object predef {
 
+  type State[S, A] = StateT[Identity, S, A]
+  def State: StateTOpt[Identity] =
+    new StateTOpt[Identity] {}
+
   def some[A](a: A): Option[A] =
     Some(a)
 

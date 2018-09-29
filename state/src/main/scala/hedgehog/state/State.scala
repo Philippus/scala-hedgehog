@@ -18,6 +18,17 @@ object Symbolic {
   /** Insert a symbolic variable in to a map of variables to types. */
   def insert[A](m: Map[Name, ClassTag[_]], s: Symbolic[A]): Map[Name, ClassTag[_]] =
     m + (s.name -> s.value)
+
+  def takeVariables[T[_[_]]](xs: T[Symbolic])(implicit HT: HTraversable[T]): TypeMap =
+    HT.htraverse[State[TypeMap, ?], Symbolic, Symbolic](xs)(new HF[State[TypeMap, ?], Symbolic, Symbolic] {
+      def apply[A](x: Symbolic[A]): State[TypeMap, Symbolic[A]] =
+        State.modify[TypeMap](m => Symbolic.insert(m, x))
+          .map(_ => x)
+    }).run(Map.empty[Name, ClassTag[_]]).value._1
+
+  def variablesOK[T[_[_]]](xs: T[Symbolic], allowed: TypeMap)(implicit HT: HTraversable[T]): Boolean =
+    takeVariables(xs).forall(v => allowed.get(v._1).contains(v._2))
+
 }
 
 /** Concrete values. */
@@ -63,17 +74,17 @@ case class EnvironmentTypeError(a: Any, b: Any) extends EnvironmentError
 // NOTE: This is different from the Haskell version that makes this a GADT
 // which I think just makes you jump through more hoops
 
-case class Require[Input[_[_]], Output, State[_[_]]](
-    run: (State[Symbolic], Input[Symbolic]) => Boolean
+case class Require[Input[_[_]], Output, S[_[_]]](
+    run: (S[Symbolic], Input[Symbolic]) => Boolean
   )
 
-trait Update[Input[_[_]], Output, State[_[_]]] {
+trait Update[Input[_[_]], Output, S[_[_]]] {
 
-  def run[V[_]](s: State[V], i: Input[V], v: Var[Output, V]): State[V]
+  def run[V[_]](s: S[V], i: Input[V], v: Var[Output, V]): S[V]
 }
 
-case class Ensure[Input[_[_]], Output, State[_[_]]](
-    run: (State[Concrete], State[Concrete], Input[Concrete], Output) => Property[Unit]
+case class Ensure[Input[_[_]], Output, S[_[_]]](
+    run: (S[Concrete], S[Concrete], Input[Concrete], Output) => Property[Unit]
   )
 
 /**********************************************************************/
@@ -84,34 +95,38 @@ case class Ensure[Input[_[_]], Output, State[_[_]]](
  * NOTE: We unfortunately expose the input/output types at the trait level (unlike the Haskell versions existentials).
  * It's almost certainly possible to use type members, but I couldn't get the path-dependent types to place nice.
  */
-trait Command[N[_], M[_], State[_[_]], Input[_[_]], Output] {
+trait Command[N[_], M[_], S[_[_]], Input[_[_]], Output] {
 
-  def gen(s: State[Symbolic]): Option[N[Input[Symbolic]]]
+  def htraverse: HTraversable[Input]
+
+  def gen(s: S[Symbolic]): Option[N[Input[Symbolic]]]
 
   def execute(s: Input[Concrete]): M[Output]
 
-  def requires: List[Require[Input, Output, State]]
+  def requires: List[Require[Input, Output, S]]
 
-  def updates: List[Update[Input, Output, State]]
+  def updates: List[Update[Input, Output, S]]
 
-  def ensures: List[Ensure[Input, Output, State]]
+  def ensures: List[Ensure[Input, Output, S]]
 
-  def genOK(state: State[Symbolic]): Boolean =
+  def genOK(state: S[Symbolic]): Boolean =
     gen(state).isDefined
 
   // Helper functions
 
-  def require(s: State[Symbolic], i: Input[Symbolic]): Boolean =
+  def require(s: S[Symbolic], i: Input[Symbolic]): Boolean =
     requires.forall(_.run(s, i))
 
-  def update[V[_]](s0: State[V], i: Input[V], o: Var[Output, V]): State[V] =
+  def update[V[_]](s0: S[V], i: Input[V], o: Var[Output, V]): S[V] =
     updates.foldLeft(s0)((s, u) => u.run(s, i, o))
 
-  def ensure(s0: State[Concrete], s: State[Concrete], i: Input[Concrete], o: Output): Property[Unit] =
+  def ensure(s0: S[Concrete], s: S[Concrete], i: Input[Concrete], o: Output): Property[Unit] =
     traverse_(ensures)(_.run(s0, s, i, o))
 }
 
-trait Action[M[_], State[_[_]], Input[_[_]], Output] {
+trait Action[M[_], S[_[_]], Input[_[_]], Output] {
+
+  def htraverse: HTraversable[Input]
 
   def input: Input[Symbolic]
 
@@ -119,18 +134,18 @@ trait Action[M[_], State[_[_]], Input[_[_]], Output] {
 
   def execute(input: Input[Concrete]): M[Output]
 
-  def require(state: State[Symbolic], input: Input[Symbolic]): Boolean
+  def require(state: S[Symbolic], input: Input[Symbolic]): Boolean
 
-  def update[V[_]](state: State[V], input: Input[V], v: Var[Output, V]): State[V]
+  def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V]
 
-  def ensure(state: State[Concrete], state2: State[Concrete], input: Input[Concrete], output: Output): Property[Unit]
+  def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit]
 }
 
-case class Context[State[_[_]]](state: State[Symbolic], vars: Map[Name, ClassTag[_]])
+case class Context[S[_[_]]](state: S[Symbolic], vars: Map[Name, ClassTag[_]])
 
 object Context {
 
-  def newVar[State[_[_]], A](c: Context[State])(implicit T: ClassTag[A]): (Context[State], Symbolic[A]) = {
+  def newVar[S[_[_]], A](c: Context[S])(implicit T: ClassTag[A]): (Context[S], Symbolic[A]) = {
     // TODO Ordering of the map, does the haskell version care?!?!
     val v: Symbolic[A] = c.vars.toList.headOption match {
       case None =>
@@ -140,15 +155,16 @@ object Context {
     }
     (c.copy(vars = Symbolic.insert[A](c.vars, v)), v)
   }
+
 }
 
 object Action {
 
-  def action[N[_], M[_], State[_[_]], Input[_[_]], Output](
-      commands: List[Command[N, M, State, Input, Output]]
-    , context: Context[State]
+  def action[N[_], M[_], S[_[_]], Input[_[_]], Output](
+      commands: List[Command[N, M, S, Input, Output]]
+    , context: Context[S]
     )(implicit F: Monad[N], T: ClassTag[Output]
-    ): GenT[N, (Context[State], Action[M, State, Input, Output])] =
+    ): GenT[N, (Context[S], Action[M, S, Input, Output])] =
 
     genT.fromSome(for {
       cmd <- genT.elementUnsafe(commands.filter(_.genOK(context.state)))
@@ -162,40 +178,61 @@ object Action {
         if (!cmd.require(context.state, inputt)) {
           genT.constant(None)
         } else {
-          val (context2, outputt) = Context.newVar[State, Output](context)
+          val (context2, outputt) = Context.newVar[S, Output](context)
           val context3 = context2.copy(state = cmd.update(context.state, inputt, Var(outputt)))
-          genT.constant(Some((context3, new Action[M, State, Input, Output] {
+          genT.constant(Some((context3, new Action[M, S, Input, Output] {
+            override def htraverse: HTraversable[Input] =
+              cmd.htraverse
             override def input: Input[Symbolic] =
               inputt
             override def output: Symbolic[Output] =
               outputt
             override def execute(input: Input[Concrete]): M[Output] =
               cmd.execute(input)
-            override def require(state: State[Symbolic], input: Input[Symbolic]): Boolean =
+            override def require(state: S[Symbolic], input: Input[Symbolic]): Boolean =
               cmd.require(state, input)
-            override def update[V[_]](state: State[V], input: Input[V], v: Var[Output, V]): State[V] =
+            override def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V] =
               cmd.update(state, input, v)
-            override def ensure(state: State[Concrete], state2: State[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
+            override def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
               cmd.ensure(state, state2, input, output)
           })))
         }
       } yield x)
 
 
-  def genActions[N[_], M[_], State[_[_]], Input[_[_]], Output](
+  def genActions[N[_], M[_], S[_[_]], Input[_[_]], Output](
       range: Range[Int]
-    , commands: List[Command[N, M, State, Input, Output]]
-    , ctx: Context[State]
+    , commands: List[Command[N, M, S, Input, Output]]
+    , ctx: Context[S]
     )(implicit F: Monad[N], T: ClassTag[Output]
-    ): GenT[N, (Context[State], List[Action[M, State, Input, Output]])] =
-    // TODO We really need a StateT here, unfortunately all the GenT functions won't be compatible
+    ): GenT[N, (Context[S], List[Action[M, S, Input, Output]])] =
+    // TODO We really need a ST here, unfortunately all the GenT functions won't be compatible
     action(commands, ctx).list(range).map(_.map(_._2)).flatMap(xs =>
-      genT.constant(dropInvalid(xs, ctx))
+      genT.constant(dropInvalid(xs).run(ctx).value)
     )
 
-  def dropInvalid[State[_[_]], Input[_[_]], Output, M[_]](
-      actions: List[Action[M, State, Input, Output]]
-    , ctx: Context[State]
-    ): (Context[State], List[Action[M, State, Input, Output]]) =
-    ???
+  /** Drops invalid actions from the sequence. */
+  def dropInvalid[S[_[_]], Input[_[_]], Output, M[_]](
+      actions: List[Action[M, S, Input, Output]]
+    ): State[Context[S], List[Action[M, S, Input, Output]]] = {
+
+    def loop(step: Action[M, S, Input, Output]): State[Context[S], Option[Action[M, S, Input, Output]]] =
+      for {
+        c <- State.get[Context[S]]
+        x <-
+          if (step.require(c.state, step.input) && Symbolic.variablesOK(step.input, c.vars)(step.htraverse)) {
+            for {
+              _ <- State.put[Context[S]](Context(
+                step.update(c.state, step.input, Var(step.output))
+              , Symbolic.insert(c.vars, step.output)
+              ))
+            } yield some(step)
+          } else {
+            State.point[Context[S], Option[Action[M, S, Input, Output]]](Option.empty[Action[M, S, Input, Output]])
+          }
+      } yield x
+    sequence[State[Context[S], ?], Option[Action[M, S, Input, Output]]](
+      actions.map(loop)).map(_.flatMap(_.toList)
+    )
+  }
 }
