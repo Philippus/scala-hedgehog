@@ -1,6 +1,15 @@
 package hedgehog.predef
 
+import hedgehog.Gen
+import hedgehog.core._
+
 case class StateT[M[_], S, A](run: S => M[(S, A)]) {
+
+  def eval(s: S)(implicit F: Functor[M]): M[A] =
+    F.map(run(s))(_._2)
+
+  def exec(s: S)(implicit F: Functor[M]): M[S] =
+    F.map(run(s))(_._1)
 
   def map[B](f: A => B)(implicit F: Functor[M]): StateT[M, S, B] =
     StateT(s => F.map(run(s))(x => x._1 -> f(x._2)))
@@ -43,6 +52,14 @@ object StateT extends StateTImplicits2 {
         StateTApplicative(F).point(a)
       override def bind[A, B](fa: StateT[M, S, A])(f: A => StateT[M, S, B]): StateT[M, S, B] =
         fa.flatMap(f)
+    }
+
+  implicit def StateTMonadGen[M[_], S](implicit F: Functor[M], G: MonadGen[M]): MonadGen[StateT[M, S, ?]] =
+    new MonadGen[StateT[M, S, ?]] {
+      def lift[A](gen: Gen[A]): StateT[M, S, A] =
+        StateT(s => F.map(G.lift(gen))(a => (s, a)))
+      def shrink[A](gen: StateT[M, S, A], f: A => List[A]): StateT[M, S, A] =
+        ???
     }
 }
 

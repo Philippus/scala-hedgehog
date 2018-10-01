@@ -220,3 +220,71 @@ trait GenTOps[M[_]] {
   def discard[A](implicit F: Monad[M]): GenT[M, A] =
     GenT((_, seed) => Tree.TreeApplicative(F).point((seed, None)))
 }
+
+trait MonadGenOps[M[_]] {
+
+  /**********************************************************************/
+  // Combinators
+
+  /**
+   * Construct a generator that depends on the size parameter.
+   */
+  def generate[A](f: (Size, Seed) => (Seed, A))(implicit G: MonadGen[M]): M[A] =
+    G.lift(GenT((size, seed) => {
+      val (s2, a) = f(size, seed)
+      Tree.TreeApplicative(Identity.IdentityMonad).point((s2, some(a)))
+    }))
+
+  /** Generates a list using a 'Range' to determine the length. */
+  def list[A](gen: M[A], range: Range[Int])(implicit F: Monad[M], G: MonadGen[M]): M[List[A]] =
+    sized(size =>
+      ensure(
+        G.shrink(
+          F.bind(integral_(range))(k => replicateM[M, A](k, gen))
+        , Shrink.list
+        )
+      , Range.atLeast(range.lowerBound(size), _)
+      )
+    )
+
+  /**********************************************************************/
+  // Combinators - Size
+
+  /**
+   * Construct a generator that depends on the size parameter.
+   */
+  def sized[A](f: Size => M[A])(implicit G: MonadGen[M], F: Monad[M]): M[A] =
+    F.bind(generate((size, seed) => (seed, size)))(f)
+
+  /**********************************************************************/
+  // Combinators - Integral
+
+  /**
+   * Generates a random integral number in the `[inclusive,inclusive]` range.
+   *
+   * ''This generator does not shrink.''
+   */
+  def integral_[A](range: Range[A])(implicit G: MonadGen[M], I: Integral[A]): M[A] =
+    generate((size, seed) => {
+      val (x, y) = range.bounds(size)
+      val (s2, a) = seed.chooseLong(I.toLong(x), I.toLong(y))
+      (s2, I.fromInt(a.toInt))
+    })
+
+  /**********************************************************************/
+  // Combinators - Conditional
+
+  /**
+   * Discards the whole generator.
+   */
+  def discard[A](implicit G: MonadGen[M]): M[A] =
+    G.lift(
+      GenT((_, seed) => Tree.TreeApplicative(Identity.IdentityMonad).point((seed, None)))
+    )
+
+  /**
+   * Discards the generator if the generated value does not satisfy the predicate.
+   */
+  def ensure[A](gen: M[A], p: A => Boolean)(implicit F: Monad[M], G: MonadGen[M]): M[A] =
+    F.bind(gen)(x => if (p(x)) F.point(x) else discard)
+}

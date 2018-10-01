@@ -22,6 +22,9 @@ package object hedgehog {
     with CharacterOps[M]
     with StringOps[M] {}
 
+  def MonadGen[M[_]] =
+    new MonadGenOps[M] {}
+
   type Property[A] = PropertyT[HM, A]
   object Property extends PropertyTOps[HM]
 

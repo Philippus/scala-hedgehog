@@ -24,7 +24,7 @@ object Symbolic {
       def apply[A](x: Symbolic[A]): State[TypeMap, Symbolic[A]] =
         State.modify[TypeMap](m => Symbolic.insert(m, x))
           .map(_ => x)
-    }).run(Map.empty[Name, ClassTag[_]]).value._1
+    }).exec(Map.empty[Name, ClassTag[_]]).value
 
   def variablesOK[T[_[_]]](xs: T[Symbolic], allowed: TypeMap)(implicit HT: HTraversable[T]): Boolean =
     takeVariables(xs).forall(v => allowed.get(v._1).contains(v._2))
@@ -162,11 +162,12 @@ object Action {
 
   def action[N[_], M[_], S[_[_]], Input[_[_]], Output](
       commands: List[Command[N, M, S, Input, Output]]
-    , context: Context[S]
     )(implicit F: Monad[N], T: ClassTag[Output]
-    ): GenT[N, (Context[S], Action[M, S, Input, Output])] =
-
+    ): StateT[GenT[N, ?], Context[S], Action[M, S, Input, Output]] =
+    ???
+    /*
     genT.fromSome(for {
+      context <- stateT.get[Context[S]]
       cmd <- genT.elementUnsafe(commands.filter(_.genOK(context.state)))
       inputt <- cmd.gen(context.state) match {
         case None =>
@@ -198,18 +199,27 @@ object Action {
           })))
         }
       } yield x)
-
+      */
 
   def genActions[N[_], M[_], S[_[_]], Input[_[_]], Output](
       range: Range[Int]
     , commands: List[Command[N, M, S, Input, Output]]
     , ctx: Context[S]
-    )(implicit F: Monad[N], T: ClassTag[Output]
-    ): GenT[N, (Context[S], List[Action[M, S, Input, Output]])] =
+    )(implicit F: Monad[N], G: Monad[M], T: ClassTag[Output]
+    ): GenT[N, (Context[S], List[Action[M, S, Input, Output]])] = {
+      val x = MonadGen[StateT[GenT[N, ?], Context[S], ?]]
+        .list[Action[M, S, Input, Output]](
+          action(commands)(F, T), range
+        )(StateT.StateTMonad(GenT.GenMonad(G)), StateT.StateTMonadGen(GenT.GenFunctor(G), GenT.GenMonadGen))
+      println(x)
+      ???
+    }
+    /*
     // TODO We really need a ST here, unfortunately all the GenT functions won't be compatible
-    action(commands, ctx).list(range).map(_.map(_._2)).flatMap(xs =>
+    action(commands).list(range).flatMap(xs =>
       genT.constant(dropInvalid(xs).run(ctx).value)
     )
+    */
 
   /** Drops invalid actions from the sequence. */
   def dropInvalid[S[_[_]], Input[_[_]], Output, M[_]](

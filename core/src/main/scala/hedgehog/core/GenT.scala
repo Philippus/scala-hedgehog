@@ -132,6 +132,13 @@ case class GenT[M[_], A](run: (Size, Seed) => Tree[M, (Seed, Option[A])]) {
     )
 }
 
+trait MonadGen[M[_]] {
+
+  def lift[A](gen: Gen[A]): M[A]
+
+  def shrink[A](gen: M[A], f: A => List[A]): M[A]
+}
+
 abstract class GenImplicits1 {
 
   implicit def GenFunctor[M[_]](implicit F: Functor[M]): Functor[GenT[M, ?]] =
@@ -155,4 +162,18 @@ abstract class GenImplicits2 extends GenImplicits1 {
     }
 }
 
-object GenT extends GenImplicits2
+object GenT extends GenImplicits2 {
+
+  implicit def GenMonad[M[_]](implicit F: Monad[M]): Monad[GenT[M, ?]] =
+    ???
+
+  implicit def GenMonadGen[M[_]]: MonadGen[GenT[M, ?]] =
+    new MonadGen[GenT[M, ?]] {
+
+      def lift[A](gen: Gen[A]): GenT[M, A] =
+        ???
+
+      def shrink[A](gen: GenT[M, A], f: A => List[A]): GenT[M, A] =
+        ???
+    }
+}
