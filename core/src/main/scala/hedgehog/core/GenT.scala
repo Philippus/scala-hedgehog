@@ -50,10 +50,13 @@ case class GenT[M[_], A](run: (Size, Seed) => Tree[M, (Seed, Option[A])]) {
     } yield x
 
   def forAll(implicit F: Monad[M]): PropertyT[M, A] =
+  // TODO Add better render, although I don't really like Show
+    forAllWithLog(_.toString)
+
+  def forAllWithLog(f: A => String)(implicit F: Monad[M]): PropertyT[M, A] =
     for {
       x <- propertyT.fromGen(this)
-      // TODO Add better render, although I don't really like Show
-      _ <- propertyT[M].writeLog(Info(x.toString))
+      _ <- propertyT[M].writeLog(Info(f(x)))
     } yield x
 
   // Different from Haskell version, which uses the MonadGen typeclass

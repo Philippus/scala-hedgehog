@@ -147,7 +147,7 @@ object Registry extends Properties {
       actions <- Action.sequential(Range.linear(1, 100), State.default[Symbolic], List(
         Spawn.command[Identity](pid)
       , Register.command[Identity](procTable)
-      )).forAll
+      ))
       _ = procTable.clear()
       _ = pid.set(Pid(0))
       x <- Action.executeSequential(State.default[Concrete], actions)

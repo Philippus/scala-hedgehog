@@ -353,8 +353,10 @@ object Action {
     , initial: S[Symbolic]
     , commands: List[Command[N, M, S]]
     )(implicit F: Monad[N]
-    ): GenT[N, List[Action[M, S]]] =
+    ): PropertyT[N, List[Action[M, S]]] =
       genActions(range, commands, Context.create(initial)).map(_._2)
+        // TODO Do we really need \r here? IntelliJ is being annoying.
+        .forAllWithLog(_.mkString("\r\n"))
 
   def executeSequential[M[_], S[_[_]]](
       initial: S[Concrete]
