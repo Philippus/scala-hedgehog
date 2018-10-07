@@ -110,7 +110,8 @@ object Register {
         }
 
       override def execute(s: Input[Concrete]): M[Output] = {
-        procTable.getOrElse(s.name, sys.error("already registered"))
+        if (procTable.contains(s.name))
+          sys.error("already registered")
         procTable += s.name -> s.value.value.value
         M.point(())
       }
@@ -118,7 +119,7 @@ object Register {
       override def requires: List[Require[Input, Output, State]] =
         List(
           newRequire((state, input) => !state.regs.contains(input.name))
-        , newRequire((state, input) => !state.regs.forall(x => x._2 == input.value))
+        , newRequire((state, input) => state.regs.forall(x => x._2 != input.value))
         )
 
       override def updates: List[Update[Input, Output, State]] =
@@ -147,6 +148,8 @@ object Registry extends Properties {
         Spawn.command[Identity](pid)
       , Register.command[Identity](procTable)
       )).forAll
+      _ = procTable.clear()
+      _ = pid.set(Pid(0))
       x <- Action.executeSequential(State.default[Concrete], actions)
     } yield x
   }
