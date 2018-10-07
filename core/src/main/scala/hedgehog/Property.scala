@@ -41,7 +41,10 @@ trait PropertyTOps[M[_]] extends PropertyTReporting[M] {
   def evalEither[A](ea: Either[String, A])(implicit F: Monad[M]): PropertyT[M, A] =
     ea match {
       case Left(e) =>
-        failure
+        for {
+          _ <- propertyT.writeLog(e)
+          a <- failure[A]
+        } yield a
       case Right(a) =>
         success.map(_ => a)
     }
