@@ -56,6 +56,6 @@ package object predef {
   def traverse_[M[_], A](fa: List[A])(f: A => M[Unit])(implicit F: Applicative[M]): M[Unit] =
     F.map(traverse(fa)(f))(_ => ())
 
-  def foldM[M[_], A, B](fa: List[A], initial: B)(f: (B, A) => M[B])(implicit F: Applicative[M]): M[B] =
-    ???
+  def foldM[M[_], A, B](fa: List[A], initial: B)(f: (B, A) => M[B])(implicit F: Monad[M]): M[B] =
+    fa.foldLeft(F.point(initial))((b, a) => F.bind(b)(b2 => f(b2, a)))
 }

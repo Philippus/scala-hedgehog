@@ -21,10 +21,20 @@ object Applicative {
     new Applicative[Either[L, ?]] {
 
       override def point[A](a: => A): Either[L, A] =
-        ???
+        Right(a)
 
       override def ap[A, B](fa: => Either[L, A])(f: => Either[L, A => B]): Either[L, B] =
-        ???
+        fa match {
+          case Left(l) =>
+            Left(l)
+          case Right(a) =>
+            f match {
+              case Left(l) =>
+                Left(l)
+              case Right(ab) =>
+                Right(ab(a))
+            }
+        }
    }
 }
 
