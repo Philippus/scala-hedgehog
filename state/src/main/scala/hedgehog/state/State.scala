@@ -282,4 +282,14 @@ object Action {
       _ <- propertyT.withM(action.ensure(state0, state, input, output))
       env = Environment(env0.value + (action.output.name -> coutput.toDyn(action.tag)))
     } yield (state, env)
+
+  def executeSequential[M[_], S[_[_]], Input[_[_]], Output](
+      initial: S[Concrete]
+    , actions: List[Action[M, S, Input, Output]]
+    )(implicit F: Monad[M]): PropertyT[M, Unit] =
+    foldM[PropertyT[M, ?], Action[M, S, Input, Output], (S[Concrete], Environment)](
+        actions
+      , (initial, Environment(Map()))
+      )((s, a) => executeUpdateEnsure(s._1, s._2, a))
+      .map(_ => ())
 }
