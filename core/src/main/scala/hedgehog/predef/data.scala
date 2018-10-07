@@ -15,6 +15,19 @@ trait Applicative[F[_]] extends Functor[F] {
     ap(fa)(point(f))
 }
 
+object Applicative {
+
+  implicit def ApplicativeEither[L]: Applicative[Either[L, ?]] =
+    new Applicative[Either[L, ?]] {
+
+      override def point[A](a: => A): Either[L, A] =
+        ???
+
+      override def ap[A, B](fa: => Either[L, A])(f: => Either[L, A => B]): Either[L, B] =
+        ???
+   }
+}
+
 trait Monad[F[_]] extends Applicative[F] {
 
   def bind[A, B](fa: F[A])(f: A => F[B]): F[B]

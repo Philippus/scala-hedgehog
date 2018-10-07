@@ -43,7 +43,7 @@ package object hedgehog {
            _ <- p.info("=== Not Equal ===")
            _ <- p.info(a1.toString)
            _ <- p.info(a2.toString)
-           _ <- p.failure
+           _ <- p.failure_
          } yield ()
      }
 

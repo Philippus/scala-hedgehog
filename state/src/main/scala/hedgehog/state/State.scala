@@ -61,12 +61,25 @@ case class Var[A, V[_]](value: V[A])
 // Symbolic Environment
 
 /** A mapping of symbolic values to concrete values. */
-case class Environment(value: Map[Name, Dynamic])
+case class Environment(value: Map[Name, ClassTag[_]]) {
+
+  def reify[A](n: Symbolic[A]): Either[EnvironmentError, Concrete[A]] =
+    value.get(n.name)
+      .toRight(EnvironmentValueNotFound(n.name))
+      .flatMap(dyn =>
+        try {
+          Right(Concrete(dyn.runtimeClass.newInstance.asInstanceOf[A]))
+        } catch {
+          case e: Exception =>
+            Left(EnvironmentTypeError(e))
+        }
+      )
+}
 
 sealed trait EnvironmentError
 case class EnvironmentValueNotFound(name: Name) extends EnvironmentError
 // TODO What is the equivalent of TypeRep in the JVM?
-case class EnvironmentTypeError(a: Any, b: Any) extends EnvironmentError
+case class EnvironmentTypeError(e: Exception) extends EnvironmentError
 
 
 /**********************************************************************/
@@ -236,4 +249,17 @@ object Action {
       actions.map(loop)).map(_.flatMap(_.toList)
     )
   }
+
+  def executeUpdateEnsure[S[_[_]], M[_], Input[_[_]], Output](
+      state0: S[Concrete]
+    , env0: Environment
+    , action: Action[M, S, Input, Output]
+    )(implicit F: Monad[M]): PropertyT[M, (S[Concrete], Environment)] =
+    for {
+      input <- propertyT.evalEither(action.htraverse.htraverse(action.input)(new HF[Either[EnvironmentError, ?], Symbolic, Concrete] {
+        def apply[A](n: Symbolic[A]): Either[EnvironmentError, Concrete[A]] =
+          env0.reify(n)
+      }).left.map(_.toString))
+      output <- propertyT.lift(action.execute(input))
+    } yield ???
 }
