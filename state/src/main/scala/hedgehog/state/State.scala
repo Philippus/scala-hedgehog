@@ -5,9 +5,16 @@ import hedgehog.core._
 import hedgehog.predef._
 
 import scala.reflect.ClassTag
+import scala.collection.immutable.SortedMap
 
 /** Symbolic variable names. */
 case class Name(value: Int)
+
+object Name {
+
+  implicit def NameOrdering: Ordering[Name] =
+    Ordering.by(_.value)
+}
 
 /** Symbolic values. */
 // TODO Is `ClassTag` a reasonable approximation of Typeable? I suspect it's not but I clearly haven't used them in anger before
@@ -16,7 +23,7 @@ case class Symbolic[A](name: Name, value: ClassTag[A])
 object Symbolic {
 
   /** Insert a symbolic variable in to a map of variables to types. */
-  def insert[A](m: Map[Name, ClassTag[_]], s: Symbolic[A]): Map[Name, ClassTag[_]] =
+  def insert[A](m: SortedMap[Name, ClassTag[_]], s: Symbolic[A]): SortedMap[Name, ClassTag[_]] =
     m + (s.name -> s.value)
 
   def takeVariables[T[_[_]]](xs: T[Symbolic])(implicit HT: HTraversable[T]): TypeMap =
@@ -24,7 +31,7 @@ object Symbolic {
       def apply[A](x: Symbolic[A]): State[TypeMap, Symbolic[A]] =
         State.modify[TypeMap](m => Symbolic.insert(m, x))
           .map(_ => x)
-    }).exec(Map.empty[Name, ClassTag[_]]).value
+    }).exec(SortedMap.empty[Name, ClassTag[_]]).value
 
   def variablesOK[T[_[_]]](xs: T[Symbolic], allowed: TypeMap)(implicit HT: HTraversable[T]): Boolean =
     takeVariables(xs).forall(v => allowed.get(v._1).contains(v._2))
@@ -250,13 +257,12 @@ trait Action[M[_], S[_[_]]] {
   }
 }
 
-case class Context[S[_[_]]](state: S[Symbolic], vars: Map[Name, ClassTag[_]])
+case class Context[S[_[_]]](state: S[Symbolic], vars: SortedMap[Name, ClassTag[_]])
 
 object Context {
 
   def newVar[S[_[_]], A](c: Context[S])(implicit T: ClassTag[A]): (Context[S], Symbolic[A]) = {
-    // TODO Ordering of the map, does the haskell version care?!?!
-    val v: Symbolic[A] = c.vars.toList.headOption match {
+    val v: Symbolic[A] = c.vars.lastOption match {
       case None =>
          Symbolic(Name(0), T)
       case Some((name, t)) =>
@@ -266,7 +272,7 @@ object Context {
   }
 
   def create[S[_[_]]](s: S[Symbolic]): Context[S] =
-    Context(s, Map())
+    Context(s, SortedMap())
 }
 
 object Action {
