@@ -164,62 +164,53 @@ object Action {
       commands: List[Command[N, M, S, Input, Output]]
     )(implicit F: Monad[N], T: ClassTag[Output]
     ): StateT[GenT[N, ?], Context[S], Action[M, S, Input, Output]] =
-    ???
-    /*
-    genT.fromSome(for {
-      context <- stateT.get[Context[S]]
-      cmd <- genT.elementUnsafe(commands.filter(_.genOK(context.state)))
+    MonadGen.fromSome(for {
+      context <- stateT[GenT[N, ?]].get[Context[S]]
+      cmd <- MonadGen[StateT[GenT[N, ?], Context[S], ?]].elementUnsafe(commands.filter(_.genOK(context.state)))
       inputt <- cmd.gen(context.state) match {
         case None =>
           sys.error("Command.gen: internal error, tried to use generator with invalid state.")
         case Some(nb) =>
-          genT.lift(nb)
+          stateT.lift[Context[S], Input[Symbolic]](genT.lift(nb))
       }
       x <-
         if (!cmd.require(context.state, inputt)) {
-          genT.constant(None)
+          stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S, Input, Output]]](None)
         } else {
           val (context2, outputt) = Context.newVar[S, Output](context)
           val context3 = context2.copy(state = cmd.update(context.state, inputt, Var(outputt)))
-          genT.constant(Some((context3, new Action[M, S, Input, Output] {
-            override def htraverse: HTraversable[Input] =
-              cmd.htraverse
-            override def input: Input[Symbolic] =
-              inputt
-            override def output: Symbolic[Output] =
-              outputt
-            override def execute(input: Input[Concrete]): M[Output] =
-              cmd.execute(input)
-            override def require(state: S[Symbolic], input: Input[Symbolic]): Boolean =
-              cmd.require(state, input)
-            override def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V] =
-              cmd.update(state, input, v)
-            override def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
-              cmd.ensure(state, state2, input, output)
-          })))
+          for {
+            _ <- stateT[GenT[N, ?]].put(context3)
+            y <- stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S, Input, Output]]](Some(new Action[M, S, Input, Output] {
+              override def htraverse: HTraversable[Input] =
+                cmd.htraverse
+              override def input: Input[Symbolic] =
+                inputt
+              override def output: Symbolic[Output] =
+                outputt
+              override def execute(input: Input[Concrete]): M[Output] =
+                cmd.execute(input)
+              override def require(state: S[Symbolic], input: Input[Symbolic]): Boolean =
+                cmd.require(state, input)
+              override def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V] =
+                cmd.update(state, input, v)
+              override def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
+                cmd.ensure(state, state2, input, output)
+            }))
+          } yield y
         }
       } yield x)
-      */
 
   def genActions[N[_], M[_], S[_[_]], Input[_[_]], Output](
       range: Range[Int]
     , commands: List[Command[N, M, S, Input, Output]]
     , ctx: Context[S]
-    )(implicit F: Monad[N], G: Monad[M], T: ClassTag[Output]
+    )(implicit F: Monad[N], T: ClassTag[Output]
     ): GenT[N, (Context[S], List[Action[M, S, Input, Output]])] = {
-      val x = MonadGen[StateT[GenT[N, ?], Context[S], ?]]
-        .list[Action[M, S, Input, Output]](
-          action(commands)(F, T), range
-        )(StateT.StateTMonad(GenT.GenMonad(G)), StateT.StateTMonadGen(GenT.GenFunctor(G), GenT.GenMonadGen))
-      println(x)
-      ???
+      for {
+        xs <- MonadGen.list(action(commands)(F, T), range).eval(ctx)
+      } yield dropInvalid(xs).run(ctx).value
     }
-    /*
-    // TODO We really need a ST here, unfortunately all the GenT functions won't be compatible
-    action(commands).list(range).flatMap(xs =>
-      genT.constant(dropInvalid(xs).run(ctx).value)
-    )
-    */
 
   /** Drops invalid actions from the sequence. */
   def dropInvalid[S[_[_]], Input[_[_]], Output, M[_]](

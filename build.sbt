@@ -98,6 +98,7 @@ lazy val compilationSettings = Seq(
     , "-Xlint"
     , "-Xfatal-warnings"
     , "-Ywarn-unused-import"
+    , "-Ypartial-unification"
     )
   , scalacOptions in (Compile,console) := Seq("-language:_", "-feature")
   , scalacOptions in (Test,console) := Seq("-language:_", "-feature")

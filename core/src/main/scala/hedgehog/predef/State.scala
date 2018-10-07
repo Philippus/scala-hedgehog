@@ -1,6 +1,7 @@
 package hedgehog.predef
 
 import hedgehog.Gen
+import hedgehog.Size
 import hedgehog.core._
 
 case class StateT[M[_], S, A](run: S => M[(S, A)]) {
@@ -58,12 +59,17 @@ object StateT extends StateTImplicits2 {
     new MonadGen[StateT[M, S, ?]] {
       def lift[A](gen: Gen[A]): StateT[M, S, A] =
         StateT(s => F.map(G.lift(gen))(a => (s, a)))
+      def scale[A](gen: StateT[M, S, A], f: Size => Size): StateT[M, S, A] =
+        ???
       def shrink[A](gen: StateT[M, S, A], f: A => List[A]): StateT[M, S, A] =
         ???
     }
 }
 
 trait StateTOpt[M[_]] {
+
+  def lift[S, A](m: M[A])(implicit F: Functor[M]): StateT[M, S, A] =
+    StateT(s => F.map(m)(a => (s, a)))
 
   def point[S, A](a: A)(implicit F: Applicative[M]): StateT[M, S, A] =
     StateT(s => F.point((s, a)))

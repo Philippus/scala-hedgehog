@@ -136,6 +136,8 @@ trait MonadGen[M[_]] {
 
   def lift[A](gen: Gen[A]): M[A]
 
+  def scale[A](gen: M[A], f: Size => Size): M[A]
+
   def shrink[A](gen: M[A], f: A => List[A]): M[A]
 }
 
@@ -171,6 +173,9 @@ object GenT extends GenImplicits2 {
     new MonadGen[GenT[M, ?]] {
 
       def lift[A](gen: Gen[A]): GenT[M, A] =
+        ???
+
+      def scale[A](gen: GenT[M, A], f: Size => Size): GenT[M, A] =
         ???
 
       def shrink[A](gen: GenT[M, A], f: A => List[A]): GenT[M, A] =

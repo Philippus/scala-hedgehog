@@ -227,6 +227,16 @@ trait MonadGenOps[M[_]] {
   // Combinators
 
   /**
+   * Runs a `Option` generator until it produces a `Some`.
+   *
+   * This is implemented using `filter` and has the same caveats.
+   */
+  def fromSome[A](gen: M[Option[A]])(implicit F: Monad[M], G: MonadGen[M]): M[A] =
+    F.map(filter(gen)(_.isDefined))(
+      _.getOrElse(sys.error("fromSome: internal error, unexpected None"))
+    )
+
+  /**
    * Construct a generator that depends on the size parameter.
    */
   def generate[A](f: (Size, Seed) => (Seed, A))(implicit G: MonadGen[M]): M[A] =
@@ -253,11 +263,57 @@ trait MonadGenOps[M[_]] {
   /**
    * Construct a generator that depends on the size parameter.
    */
-  def sized[A](f: Size => M[A])(implicit G: MonadGen[M], F: Monad[M]): M[A] =
+  def sized[A](f: Size => M[A])(implicit F: Monad[M], G: MonadGen[M]): M[A] =
     F.bind(generate((size, seed) => (seed, size)))(f)
+
+  /**
+   * Override the size parameter. Returns a generator which uses the given size
+   * instead of the runtime-size parameter.
+   */
+  def resize[A](gen: M[A], size: Size)(G: MonadGen[M]): M[A] =
+    G.scale(gen, _ => size)
 
   /**********************************************************************/
   // Combinators - Integral
+
+  /**
+   * Generates a random integral number in the given `[inclusive,inclusive]` range.
+   *
+   * When the generator tries to shrink, it will shrink towards the
+   * [[Range.origin]] of the specified [[Range]].
+   *
+   * For example, the following generator will produce a number between `1970`
+   * and `2100`, but will shrink towards `2000`:
+   *
+   * {{{
+   * Gen.integral(Range.constantFrom(2000, 1970, 2100))
+   * }}}
+   *
+   * Some sample outputs from this generator might look like:
+   *
+   * {{{
+   * === Outcome ===
+   * 1973
+   * === Shrinks ===
+   * 2000
+   * 1987
+   * 1980
+   * 1976
+   * 1974
+   *
+   * === Outcome ===
+   * 2061
+   * === Shrinks ===
+   * 2000
+   * 2031
+   * 2046
+   * 2054
+   * 2058
+   * 2060
+   * }}}
+   */
+  def integral[A : Integral](range: Range[A])(implicit F: MonadGen[M]): M[A] =
+    F.shrink(integral_[A](range), Shrink.towards(range.origin, _))
 
   /**
    * Generates a random integral number in the `[inclusive,inclusive]` range.
@@ -272,6 +328,33 @@ trait MonadGenOps[M[_]] {
     })
 
   /**********************************************************************/
+  // Combinators - Choice
+
+  /**
+   * Randomly selects one of the elements in the list.
+   *
+   * This generator shrinks towards the first element in the list.
+   */
+  def element[A](x: A, xs: List[A])(implicit F: Functor[M], G: MonadGen[M]): M[A] =
+    F.map(integral[Int](Range.constant(0, xs.length)))(i => (x :: xs)(i))
+
+  /**
+   * Randomly selects one of the elements in the list.
+   *
+   * This generator shrinks towards the first element in the list.
+   *
+   * WARNING: This may throw an exception if the list is empty,
+   * please use one of the other `element` variants if possible
+   */
+  def elementUnsafe[A](xs: List[A])(implicit F: Functor[M], G: MonadGen[M]): M[A] =
+    xs match {
+      case Nil =>
+        sys.error("element: used with empty list")
+      case h :: t =>
+        element(h, t)
+    }
+
+  /**********************************************************************/
   // Combinators - Conditional
 
   /**
@@ -281,6 +364,26 @@ trait MonadGenOps[M[_]] {
     G.lift(
       GenT((_, seed) => Tree.TreeApplicative(Identity.IdentityMonad).point((seed, None)))
     )
+
+  /**
+   * Generates a value that satisfies a predicate.
+   *
+   * We keep some state to avoid looping forever.
+   * If we trigger these limits then the whole generator is discarded.
+   */
+  def filter[A](gen: M[A])(p: A => Boolean)(implicit F: Monad[M], G: MonadGen[M]): M[A] = {
+    def try_(k: Int): M[A] =
+      if (k > 100)
+        discard
+      else
+        F.bind(G.scale(gen, s => Size(2 * k + s.value)))(x =>
+          if (p(x))
+            F.point(x)
+          else
+            try_(k + 1)
+        )
+    try_(0)
+  }
 
   /**
    * Discards the generator if the generated value does not satisfy the predicate.
