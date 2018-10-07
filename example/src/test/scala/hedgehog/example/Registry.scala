@@ -110,7 +110,7 @@ object Register {
         }
 
       override def execute(s: Input[Concrete]): M[Output] = {
-        if (procTable.contains(s.name))
+        if (procTable.contains(s.name) || procTable.size > 4)
           sys.error("already registered")
         procTable += s.name -> s.value.value.value
         M.point(())
