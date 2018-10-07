@@ -19,6 +19,9 @@ case class GenT[M[_], A](run: (Size, Seed) => Tree[M, (Seed, Option[A])]) {
   def mapTree[N[_], B](f: Tree[M, (Seed, Option[A])] => Tree[N, (Seed, Option[B])]): GenT[N, B] =
     GenT((size, seed) => f(run(size, seed)))
 
+  def hoist[N[_]](f: M ~> N)(implicit F: Functor[M]): GenT[N, A] =
+    GenT((size, seed) => run(size, seed).hoist(f))
+
   /**********************************************************************/
   // Shrinking
 

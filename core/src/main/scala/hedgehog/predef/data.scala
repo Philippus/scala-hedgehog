@@ -35,3 +35,7 @@ trait Monad[F[_]] extends Applicative[F] {
   override def ap[A, B](fa: => F[A])(f: => F[A => B]): F[B] =
     bind(f)(x => map(fa)(x))
 }
+
+trait ~>[M[_], N[_]] {
+  def apply[A](m: M[A]): N[A]
+}

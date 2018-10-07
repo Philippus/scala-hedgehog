@@ -14,6 +14,9 @@ trait PropertyTOps[M[_]] extends PropertyTReporting[M] {
   def lift[A](m: M[A])(implicit F: Monad[M]): PropertyT[M, A] =
     fromGen(genT.lift(m))
 
+  def withM[A](m: Property[A])(implicit F: Monad[M]): PropertyT[M, A] =
+    m.copy(run = m.run.hoist(Identity.liftM))
+
   def writeLog(log: Log)(implicit F: Monad[M]): PropertyT[M, Unit] =
     hoist((List(log), ()))
 

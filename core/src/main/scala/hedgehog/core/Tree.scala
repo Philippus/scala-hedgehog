@@ -6,6 +6,9 @@ case class Node[M[_], A](value: A, children: List[Tree[M, A]]) {
 
   def map[B](f: A => B)(implicit F: Functor[M]): Node[M, B] =
     Node.NodeFunctor.map(this)(f)
+
+  def hoist[N[_]](f: M ~> N)(implicit F: Functor[M]): Node[N, A] =
+    Node(value, children.map(_.hoist(f)))
 }
 
 case class Tree[M[_], A](run: M[Node[M, A]]) {
@@ -23,6 +26,9 @@ case class Tree[M[_], A](run: M[Node[M, A]]) {
 
   def prune(implicit F: Monad[M]): Tree[M, A] =
     Tree(F.bind(run)(x => F.point(Node(x.value, List()))))
+
+  def hoist[N[_]](f: M ~> N)(implicit F: Functor[M]): Tree[N, A] =
+    Tree(f(F.map(run)(_.hoist(f))))
 }
 
 object Node {

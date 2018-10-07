@@ -19,6 +19,12 @@ object Identity {
         a
     }
 
+  def liftM[M[_]](implicit F: Applicative[M]): ~>[Identity, M] =
+    new ~>[Identity, M] {
+      def apply[A](a: Identity[A]): M[A] =
+        F.point(a.value)
+    }
+
   implicit def IdentityMonad: Monad[Identity] =
     new Monad[Identity] {
 

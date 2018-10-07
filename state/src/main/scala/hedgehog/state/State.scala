@@ -31,8 +31,19 @@ object Symbolic {
 
 }
 
+trait Dynamic {
+
+  type A
+  val value: A
+  val tag: ClassTag[A]
+}
+
 /** Concrete values. */
-case class Concrete[A](value: A)
+case class Concrete[B](value: B) { self =>
+
+  def toDyn(implicit T: ClassTag[B]): Dynamic =
+    new Dynamic { type A = B; val value: A = self.value; val tag: ClassTag[A] = T }
+}
 
 /**********************************************************************/
 
@@ -61,17 +72,16 @@ case class Var[A, V[_]](value: V[A])
 // Symbolic Environment
 
 /** A mapping of symbolic values to concrete values. */
-case class Environment(value: Map[Name, ClassTag[_]]) {
+case class Environment(value: Map[Name, Dynamic]) {
 
   def reify[A](n: Symbolic[A]): Either[EnvironmentError, Concrete[A]] =
     value.get(n.name)
       .toRight(EnvironmentValueNotFound(n.name))
       .flatMap(dyn =>
-        try {
-          Right(Concrete(dyn.runtimeClass.newInstance.asInstanceOf[A]))
-        } catch {
-          case e: Exception =>
-            Left(EnvironmentTypeError(e))
+        if (n.value == dyn.tag) {
+          Right(Concrete(dyn.value.asInstanceOf[A]))
+        } else {
+          Left(EnvironmentTypeError(dyn))
         }
       )
 }
@@ -79,7 +89,7 @@ case class Environment(value: Map[Name, ClassTag[_]]) {
 sealed trait EnvironmentError
 case class EnvironmentValueNotFound(name: Name) extends EnvironmentError
 // TODO What is the equivalent of TypeRep in the JVM?
-case class EnvironmentTypeError(e: Exception) extends EnvironmentError
+case class EnvironmentTypeError(e: Dynamic) extends EnvironmentError
 
 
 /**********************************************************************/
@@ -112,6 +122,8 @@ trait Command[N[_], M[_], S[_[_]], Input[_[_]], Output] {
 
   def htraverse: HTraversable[Input]
 
+  def tag: ClassTag[Output]
+
   def gen(s: S[Symbolic]): Option[N[Input[Symbolic]]]
 
   def execute(s: Input[Concrete]): M[Output]
@@ -140,6 +152,8 @@ trait Command[N[_], M[_], S[_[_]], Input[_[_]], Output] {
 trait Action[M[_], S[_[_]], Input[_[_]], Output] {
 
   def htraverse: HTraversable[Input]
+
+  def tag: ClassTag[Output]
 
   def input: Input[Symbolic]
 
@@ -197,6 +211,8 @@ object Action {
             y <- stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S, Input, Output]]](Some(new Action[M, S, Input, Output] {
               override def htraverse: HTraversable[Input] =
                 cmd.htraverse
+              override def tag: ClassTag[Output] =
+                cmd.tag
               override def input: Input[Symbolic] =
                 inputt
               override def output: Symbolic[Output] =
@@ -261,5 +277,9 @@ object Action {
           env0.reify(n)
       }).left.map(_.toString))
       output <- propertyT.lift(action.execute(input))
-    } yield ???
+      coutput = Concrete(output)
+      state = action.update(state0, input, Var(coutput))
+      _ <- propertyT.withM(action.ensure(state0, state, input, output))
+      env = Environment(env0.value + (action.output.name -> coutput.toDyn(action.tag)))
+    } yield (state, env)
 }
