@@ -118,7 +118,10 @@ case class Ensure[Input[_[_]], Output, S[_[_]]](
  * NOTE: We unfortunately expose the input/output types at the trait level (unlike the Haskell versions existentials).
  * It's almost certainly possible to use type members, but I couldn't get the path-dependent types to place nice.
  */
-trait Command[N[_], M[_], S[_[_]], Input[_[_]], Output] {
+trait Command[N[_], M[_], S[_[_]]] { self =>
+
+  type Input[_[_]]
+  type Output
 
   def htraverse: HTraversable[Input]
 
@@ -147,9 +150,56 @@ trait Command[N[_], M[_], S[_[_]], Input[_[_]], Output] {
 
   def ensure(s0: S[Concrete], s: S[Concrete], i: Input[Concrete], o: Output): Property[Unit] =
     traverse_(ensures)(_.run(s0, s, i, o))
+
+  // NOTE: I found the compiler didn't play nicely with the type variables as a separate function,
+  // and it was easier to include inline
+  final def action(context: Context[S])(implicit F: Monad[N]): StateT[GenT[N, ?], Context[S], Option[Action[M, S]]] =
+    for {
+      inputt <- gen(context.state) match {
+        case None =>
+          sys.error("Command.gen: internal error, tried to use generator with invalid state.")
+        case Some(nb) =>
+          stateT.lift[Context[S], Input[Symbolic]](genT.lift(nb))
+      }
+      x <-
+        if (!require(context.state, inputt)) {
+          stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S]]](None)
+        } else {
+          val (context2, outputt) = Context.newVar[S, Output](context)(tag)
+          val context3 = context2.copy(state = update(context.state, inputt, Var(outputt)))
+          for {
+            _ <- stateT[GenT[N, ?]].put(context3)
+            y <- stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S]]](Some(new Action[M, S] {
+              override type Input[X[_]] =
+                self.Input[X]
+              override type Output =
+                self.Output
+              override def htraverse: HTraversable[Input] =
+                self.htraverse
+              override def tag: ClassTag[Output] =
+                self.tag
+              override def input: Input[Symbolic] =
+                inputt
+              override def output: Symbolic[Output] =
+                outputt
+              override def execute(input: Input[Concrete]): M[Output] =
+                self.execute(input)
+              override def require(state: S[Symbolic], input: Input[Symbolic]): Boolean =
+                self.require(state, input)
+              override def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V] =
+                self.update(state, input, v)
+              override def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
+                self.ensure(state, state2, input, output)
+            }))
+          } yield y
+        }
+    } yield x
 }
 
-trait Action[M[_], S[_[_]], Input[_[_]], Output] {
+trait Action[M[_], S[_[_]]] {
+
+  type Input[_[_]]
+  type Output
 
   def htraverse: HTraversable[Input]
 
@@ -187,66 +237,33 @@ object Context {
 
 object Action {
 
-  def action[N[_], M[_], S[_[_]], Input[_[_]], Output](
-      commands: List[Command[N, M, S, Input, Output]]
-    )(implicit F: Monad[N], T: ClassTag[Output]
-    ): StateT[GenT[N, ?], Context[S], Action[M, S, Input, Output]] =
+  def action[N[_], M[_], S[_[_]]](
+      commands: List[Command[N, M, S]]
+    )(implicit F: Monad[N]
+    ): StateT[GenT[N, ?], Context[S], Action[M, S]] =
     MonadGen.fromSome(for {
       context <- stateT[GenT[N, ?]].get[Context[S]]
       cmd <- MonadGen[StateT[GenT[N, ?], Context[S], ?]].elementUnsafe(commands.filter(_.genOK(context.state)))
-      inputt <- cmd.gen(context.state) match {
-        case None =>
-          sys.error("Command.gen: internal error, tried to use generator with invalid state.")
-        case Some(nb) =>
-          stateT.lift[Context[S], Input[Symbolic]](genT.lift(nb))
-      }
-      x <-
-        if (!cmd.require(context.state, inputt)) {
-          stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S, Input, Output]]](None)
-        } else {
-          val (context2, outputt) = Context.newVar[S, Output](context)
-          val context3 = context2.copy(state = cmd.update(context.state, inputt, Var(outputt)))
-          for {
-            _ <- stateT[GenT[N, ?]].put(context3)
-            y <- stateT[GenT[N, ?]].point[Context[S], Option[Action[M, S, Input, Output]]](Some(new Action[M, S, Input, Output] {
-              override def htraverse: HTraversable[Input] =
-                cmd.htraverse
-              override def tag: ClassTag[Output] =
-                cmd.tag
-              override def input: Input[Symbolic] =
-                inputt
-              override def output: Symbolic[Output] =
-                outputt
-              override def execute(input: Input[Concrete]): M[Output] =
-                cmd.execute(input)
-              override def require(state: S[Symbolic], input: Input[Symbolic]): Boolean =
-                cmd.require(state, input)
-              override def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V] =
-                cmd.update(state, input, v)
-              override def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit] =
-                cmd.ensure(state, state2, input, output)
-            }))
-          } yield y
-        }
-      } yield x)
+      a <- cmd.action(context)
+      } yield a)
 
-  def genActions[N[_], M[_], S[_[_]], Input[_[_]], Output](
+  def genActions[N[_], M[_], S[_[_]]](
       range: Range[Int]
-    , commands: List[Command[N, M, S, Input, Output]]
+    , commands: List[Command[N, M, S]]
     , ctx: Context[S]
-    )(implicit F: Monad[N], T: ClassTag[Output]
-    ): GenT[N, (Context[S], List[Action[M, S, Input, Output]])] = {
+    )(implicit F: Monad[N]
+    ): GenT[N, (Context[S], List[Action[M, S]])] = {
       for {
-        xs <- MonadGen.list(action(commands)(F, T), range).eval(ctx)
+        xs <- MonadGen.list(action(commands), range).eval(ctx)
       } yield dropInvalid(xs).run(ctx).value
     }
 
   /** Drops invalid actions from the sequence. */
-  def dropInvalid[S[_[_]], Input[_[_]], Output, M[_]](
-      actions: List[Action[M, S, Input, Output]]
-    ): State[Context[S], List[Action[M, S, Input, Output]]] = {
+  def dropInvalid[S[_[_]], M[_]](
+      actions: List[Action[M, S]]
+    ): State[Context[S], List[Action[M, S]]] = {
 
-    def loop(step: Action[M, S, Input, Output]): State[Context[S], Option[Action[M, S, Input, Output]]] =
+    def loop(step: Action[M, S]): State[Context[S], Option[Action[M, S]]] =
       for {
         c <- State.get[Context[S]]
         x <-
@@ -258,18 +275,18 @@ object Action {
               ))
             } yield some(step)
           } else {
-            State.point[Context[S], Option[Action[M, S, Input, Output]]](Option.empty[Action[M, S, Input, Output]])
+            State.point[Context[S], Option[Action[M, S]]](Option.empty[Action[M, S]])
           }
       } yield x
-    sequence[State[Context[S], ?], Option[Action[M, S, Input, Output]]](
+    sequence[State[Context[S], ?], Option[Action[M, S]]](
       actions.map(loop)).map(_.flatMap(_.toList)
     )
   }
 
-  def executeUpdateEnsure[S[_[_]], M[_], Input[_[_]], Output](
+  def executeUpdateEnsure[S[_[_]], M[_]](
       state0: S[Concrete]
     , env0: Environment
-    , action: Action[M, S, Input, Output]
+    , action: Action[M, S]
     )(implicit F: Monad[M]): PropertyT[M, (S[Concrete], Environment)] =
     for {
       input <- propertyT.evalEither(action.htraverse.htraverse(action.input)(new HF[Either[EnvironmentError, ?], Symbolic, Concrete] {
@@ -283,11 +300,11 @@ object Action {
       env = Environment(env0.value + (action.output.name -> coutput.toDyn(action.tag)))
     } yield (state, env)
 
-  def executeSequential[M[_], S[_[_]], Input[_[_]], Output](
+  def executeSequential[M[_], S[_[_]]](
       initial: S[Concrete]
-    , actions: List[Action[M, S, Input, Output]]
+    , actions: List[Action[M, S]]
     )(implicit F: Monad[M]): PropertyT[M, Unit] =
-    foldM[PropertyT[M, ?], Action[M, S, Input, Output], (S[Concrete], Environment)](
+    foldM[PropertyT[M, ?], Action[M, S], (S[Concrete], Environment)](
         actions
       , (initial, Environment(Map()))
       )((s, a) => executeUpdateEnsure(s._1, s._2, a))

@@ -45,7 +45,7 @@ lazy val example = Project(
     name := "hedgehog-example"
   ) ++ Seq(libraryDependencies ++= Seq(
   ))
-  ).dependsOn(core, runner, sbtTest)
+  ).dependsOn(core, runner, sbtTest, state)
 
 lazy val runner = Project(
     id = "runner"
@@ -84,7 +84,7 @@ lazy val test = Project(
   , testFrameworks := Seq(TestFramework("hedgehog.sbt.Framework"))
   ) ++ Seq(libraryDependencies ++= Seq(
     ))
-  ).dependsOn(core, runner, sbtTest)
+  ).dependsOn(core, runner, sbtTest, state)
 
 lazy val compilationSettings = Seq(
     maxErrors := 10
