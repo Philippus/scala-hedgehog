@@ -236,6 +236,18 @@ trait Action[M[_], S[_[_]]] {
   def update[V[_]](state: S[V], input: Input[V], v: Var[Output, V]): S[V]
 
   def ensure(state: S[Concrete], state2: S[Concrete], input: Input[Concrete], output: Output): Property[Unit]
+
+  // FIXME we should not abuse `toString` to get nice output for actions
+  override def toString: String = {
+    val prefix0 = s"Var ${output.toString} = "
+    val prefix = prefix0.map(_ => ' ')
+    input.toString.split('\n').toList match {
+      case Nil =>
+        prefix0 + "?"
+      case x :: xs =>
+        (prefix0 + x :: xs.map(prefix + _)).mkString("\n")
+    }
+  }
 }
 
 case class Context[S[_[_]]](state: S[Symbolic], vars: Map[Name, ClassTag[_]])

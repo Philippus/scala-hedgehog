@@ -118,7 +118,7 @@ object Register {
       override def requires: List[Require[Input, Output, State]] =
         List(
           newRequire((state, input) => !state.regs.contains(input.name))
-        , newRequire((state, input) => !state.regs.forall(x => x._2 == input.value))
+        , newRequire((state, input) => true) // !state.regs.forall(x => x._2 == input.value))
         )
 
       override def updates: List[Update[Input, Output, State]] =
