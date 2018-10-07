@@ -68,6 +68,18 @@ case class Concrete[B](value: B) { self =>
  */
 case class Var[A, V[_]](value: V[A])
 
+object Var {
+
+  implicit def HTraversableVar[A]: HTraversable[Var[A, ?[_]]] =
+    new HTraversable[Var[A, ?[_]]] {
+      override def htraverse[F[_], G[_], H[_]](t: Var[A, G])(f: HF[F, G, H])(implicit A: Applicative[F]): F[Var[A, H]] =
+        t match {
+          case Var(v) =>
+            A.map(f(v))(Var(_))
+        }
+    }
+}
+
 /**********************************************************************/
 // Symbolic Environment
 
@@ -97,18 +109,20 @@ case class EnvironmentTypeError(e: Dynamic) extends EnvironmentError
 // NOTE: This is different from the Haskell version that makes this a GADT
 // which I think just makes you jump through more hoops
 
-case class Require[Input[_[_]], Output, S[_[_]]](
-    run: (S[Symbolic], Input[Symbolic]) => Boolean
-  )
+trait Require[Input[_[_]], Output, S[_[_]]] {
+
+  def run(state: S[Symbolic], input: Input[Symbolic]): Boolean
+}
 
 trait Update[Input[_[_]], Output, S[_[_]]] {
 
-  def run[V[_]](s: S[V], i: Input[V], v: Var[Output, V]): S[V]
+  def run[V[_]](state: S[V], input: Input[V], output: Var[Output, V]): S[V]
 }
 
-case class Ensure[Input[_[_]], Output, S[_[_]]](
-    run: (S[Concrete], S[Concrete], Input[Concrete], Output) => Property[Unit]
-  )
+trait Ensure[Input[_[_]], Output, S[_[_]]] {
+
+  def run(old: S[Concrete], newS: S[Concrete], input: Input[Concrete], output: Output): Property[Unit]
+}
 
 /**********************************************************************/
 
@@ -127,7 +141,7 @@ trait Command[N[_], M[_], S[_[_]]] { self =>
 
   def tag: ClassTag[Output]
 
-  def gen(s: S[Symbolic]): Option[N[Input[Symbolic]]]
+  def gen(s: S[Symbolic]): Option[GenT[N, Input[Symbolic]]]
 
   def execute(s: Input[Concrete]): M[Output]
 
@@ -141,6 +155,12 @@ trait Command[N[_], M[_], S[_[_]]] { self =>
     gen(state).isDefined
 
   // Helper functions
+
+  def newRequire(f: (S[Symbolic], Input[Symbolic]) => Boolean): Require[Input, Output, S] =
+    new Require[Input, Output, S] {
+      def run(state: S[Symbolic], input: Input[Symbolic]): Boolean =
+        f(state, input)
+    }
 
   def require(s: S[Symbolic], i: Input[Symbolic]): Boolean =
     requires.forall(_.run(s, i))
@@ -159,7 +179,7 @@ trait Command[N[_], M[_], S[_[_]]] { self =>
         case None =>
           sys.error("Command.gen: internal error, tried to use generator with invalid state.")
         case Some(nb) =>
-          stateT.lift[Context[S], Input[Symbolic]](genT.lift(nb))
+          stateT.lift[Context[S], Input[Symbolic]](nb)
       }
       x <-
         if (!require(context.state, inputt)) {
@@ -295,7 +315,14 @@ object Action {
         def apply[A](n: Symbolic[A]): Either[EnvironmentError, Concrete[A]] =
           env0.reify(n)
       }).left.map(_.toString))
-      output <- propertyT.lift(action.execute(input))
+      output <-
+        // TODO TODO TODO Change type of execute to return Either[String, ?] or something
+        try {
+          propertyT.lift(action.execute(input))
+        } catch {
+          case e: Exception =>
+            propertyT[M].evalEither[action.Output](Left(e.toString))
+        }
       coutput = Concrete(output)
       state = action.update(state0, input, Var(coutput))
       _ <- propertyT.withM(action.ensure(state0, state, input, output))
