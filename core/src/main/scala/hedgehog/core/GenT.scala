@@ -170,18 +170,28 @@ abstract class GenImplicits2 extends GenImplicits1 {
 object GenT extends GenImplicits2 {
 
   implicit def GenMonad[M[_]](implicit F: Monad[M]): Monad[GenT[M, ?]] =
-    ???
+    new Monad[GenT[M, ?]] {
 
-  implicit def GenMonadGen[M[_]]: MonadGen[GenT[M, ?]] =
+     override def map[A, B](fa: GenT[M, A])(f: A => B): GenT[M, B] =
+       fa.map(f)
+
+     override def point[A](a: => A): GenT[M, A] =
+       GenApplicative(F).point(a)
+
+      override def bind[A, B](fa: GenT[M, A])(f: A => GenT[M, B]): GenT[M, B] =
+        fa.flatMap(f)
+    }
+
+  implicit def GenMonadGen[M[_]](implicit F: Monad[M]): MonadGen[GenT[M, ?]] =
     new MonadGen[GenT[M, ?]] {
 
       def lift[A](gen: Gen[A]): GenT[M, A] =
-        ???
+        gen.hoist(new ~>[Identity, M] { def apply[B](a: Identity[B]): M[B] = F.point(a.value) })
 
       def scale[A](gen: GenT[M, A], f: Size => Size): GenT[M, A] =
-        ???
+        gen.scale(f)
 
       def shrink[A](gen: GenT[M, A], f: A => List[A]): GenT[M, A] =
-        ???
+        gen.shrink(f)
     }
 }

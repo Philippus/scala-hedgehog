@@ -233,6 +233,8 @@ object Context {
     (c.copy(vars = Symbolic.insert[A](c.vars, v)), v)
   }
 
+  def create[S[_[_]]](s: S[Symbolic]): Context[S] =
+    Context(s, Map())
 }
 
 object Action {
@@ -299,6 +301,15 @@ object Action {
       _ <- propertyT.withM(action.ensure(state0, state, input, output))
       env = Environment(env0.value + (action.output.name -> coutput.toDyn(action.tag)))
     } yield (state, env)
+
+
+  def sequential[N[_], M[_], S[_[_]]](
+      range: Range[Int]
+    , initial: S[Symbolic]
+    , commands: List[Command[N, M, S]]
+    )(implicit F: Monad[N]
+    ): GenT[N, List[Action[M, S]]] =
+      genActions(range, commands, Context.create(initial)).map(_._2)
 
   def executeSequential[M[_], S[_[_]]](
       initial: S[Concrete]

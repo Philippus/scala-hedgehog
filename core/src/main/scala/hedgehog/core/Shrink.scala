@@ -119,4 +119,7 @@ object Shrink {
        case y :: ys =>
          if (x == y) y :: ys else x :: y :: ys
      }
+
+  def list2[A, B](f: A => List[A], b: B, x: A): List[(B, A)] =
+    f(x).map(a => (b, a))
 }
